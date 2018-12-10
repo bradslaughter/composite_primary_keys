@@ -24,23 +24,15 @@ module ActiveRecord
         else
           scope.where! construct_join_attributes(*records)
         end
+        scope = scope.where(through_scope_attributes)
 
         case method
         when :destroy
           if scope.klass.primary_key
-            count = scope.destroy_all.length
+            count = scope.destroy_all.count(&:destroyed?)
           else
-            scope.to_a.each do |record|
-              record.run_callbacks :destroy
-            end
-
-            arel = scope.arel
-
-            stmt = Arel::DeleteManager.new arel.engine
-            stmt.from scope.klass.arel_table
-            stmt.wheres = arel.constraints
-
-            count = scope.klass.connection.delete(stmt, 'SQL', scope.bind_values)
+            scope.each(&:_run_destroy_callbacks)
+            count = scope.delete_all
           end
         when :nullify
           count = scope.update_all(source_reflection.foreign_key => nil)
@@ -57,9 +49,11 @@ module ActiveRecord
 
         if through_reflection.collection? && update_through_counter?(method)
           update_counter(-count, through_reflection)
+        else
+          update_counter(-count)
         end
 
-        update_counter(-count)
+        count
       end
 
       def through_records_for(record)
